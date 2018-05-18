@@ -4,7 +4,7 @@ import (
 	"github.com/mumblepins/compy/proxy"
 	"net/http"
 	"image/gif"
-	"log"
+	log "github.com/sirupsen/logrus"
 	"bytes"
 	"io"
 	"os/exec"
