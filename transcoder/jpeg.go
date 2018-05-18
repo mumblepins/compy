@@ -1,7 +1,7 @@
 package transcoder
 
 import (
-	"github.com/barnacs/compy/proxy"
+	"github.com/mumblepins/compy/proxy"
 	"github.com/chai2010/webp"
 	"github.com/pixiv/go-libjpeg/jpeg"
 	"net/http"

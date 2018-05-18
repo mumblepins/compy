@@ -1,31 +1,72 @@
 package transcoder
 
 import (
-	"github.com/barnacs/compy/proxy"
-	"github.com/chai2010/webp"
-	"image/gif"
+	"github.com/mumblepins/compy/proxy"
 	"net/http"
+	"image/gif"
+	"log"
+	"bytes"
+	"io"
+	"os/exec"
+	"io/ioutil"
+	"path/filepath"
+	"syscall"
+	"os"
+	"bufio"
+	"sync"
 )
 
 type Gif struct{}
 
 func (t *Gif) Transcode(w *proxy.ResponseWriter, r *proxy.ResponseReader, headers http.Header) error {
-	img, err := gif.Decode(r)
-	if err != nil {
-		return err
-	}
+
 	if SupportsWebP(headers) {
-		w.Header().Set("Content-Type", "image/webp")
-		options := webp.Options{
-			Lossless: true,
-		}
-		if err = webp.Encode(w, img, &options); err != nil {
-			return err
-		}
+
+		tmpDir, _ := ioutil.TempDir("", "named-pipes")
+		defer os.RemoveAll(tmpDir)
+		// Create named pipe
+		namedPipe := filepath.Join(tmpDir, "gif_input")
+		syscall.Mkfifo(namedPipe, 0600)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			cmd := exec.Command("gif2webp", "-lossy", "-q", "30", "-m", "2",
+				//"-min_size",
+				namedPipe,
+				"-o", "-")
+			cmd.Stdout = w
+			//start := time.Now()
+			err := cmd.Run()
+			//log.Println(time.Since(start))
+			if err != nil {
+				log.Panicln(err)
+			}
+
+		}()
+		go func() {
+			defer wg.Done()
+			pipe, _ := os.OpenFile(namedPipe, os.O_RDWR, 0600)
+			bufread := bufio.NewReader(r)
+			bufread.WriteTo(pipe)
+		}()
+		wg.Wait()
 	} else {
-		if err = gif.Encode(w, img, nil); err != nil {
-			return err
+		var buf bytes.Buffer
+		tRead := io.TeeReader(r, &buf)
+		img, err := gif.DecodeAll(tRead)
+		if err != nil {
+			log.Panicln(err)
 		}
+
+		if len(img.Image) == 1 {
+			buf.WriteTo(w)
+		} else {
+			if err = gif.Encode(w, img.Image[0], nil); err != nil {
+				return err
+			}
+		}
+
 	}
 	return nil
 }

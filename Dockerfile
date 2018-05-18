@@ -1,47 +1,24 @@
-FROM ubuntu:16.04 as compy-builder
-MAINTAINER Barna Csorogi <barnacs@justletit.be>
+FROM alpine:3.7 as compy-builder
 
-RUN DEBIAN_FRONTEND=noninteractive apt-get update && \
-    DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y \
-        curl \
-        g++ \
-        git \
-        libjpeg8-dev
 
-RUN mkdir -p /usr/local/ && \
-    curl -O https://storage.googleapis.com/golang/go1.9.linux-amd64.tar.gz && \
-    tar xf go1.9.linux-amd64.tar.gz -C /usr/local
+RUN apk add --no-cache go curl git libjpeg jpeg-dev libressl build-base
+RUN go get -v github.com/mumblepins/compy
+RUN rm -r /root/go/src/github.com/mumblepins/compy/ && \
+    mkdir -p /root/go/src/github.com/mumblepins/compy/
+COPY . /root/go/src/github.com/mumblepins/compy/
+WORKDIR /root/go/src/github.com/mumblepins/compy
+RUN go get -d -v ./...
+RUN go build -v
 
-RUN mkdir -p /go/src/github.com/barnacs/compy/
-COPY . /go/src/github.com/barnacs/compy/
-WORKDIR /go/src/github.com/barnacs/compy
-RUN /usr/local/go/bin/go get -d -v ./...
-RUN /usr/local/go/bin/go build -v
+FROM alpine:3.7
+COPY --from=compy-builder /root/go/src/github.com/mumblepins/compy/compy /usr/local/bin/compy
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
-FROM ubuntu:16.04
-MAINTAINER Barna Csorogi <barnacs@justletit.be>
-
-RUN DEBIAN_FRONTEND=noninteractive apt-get update && \
-    DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y \
-        libjpeg8 \
-        openssl \
-        ssl-cert && \
-    DEBIAN_FRONTEND=noninteractive apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
-WORKDIR /opt/compy
-COPY \
-    --from=compy-builder \
-    /go/src/github.com/barnacs/compy/compy \
-    /go/src/github.com/barnacs/compy/docker.sh \
-    /opt/compy/
-
-# TODO: configure HTTP BASIC authentication
-# TODO: user-provided certificates
-ENV \
-    CERTIFICATE_DOMAIN="localhost"
+RUN apk add --no-cache libjpeg libstdc++ ca-certificates libwebp-tools \
+        && chmod +x /usr/local/bin/entrypoint.sh
 
 EXPOSE 9999
-ENTRYPOINT ["./docker.sh"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+
+
+

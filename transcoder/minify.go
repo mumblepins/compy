@@ -1,7 +1,7 @@
 package transcoder
 
 import (
-	"github.com/barnacs/compy/proxy"
+	"github.com/mumblepins/compy/proxy"
 	"github.com/tdewolff/minify"
 	"github.com/tdewolff/minify/css"
 	"github.com/tdewolff/minify/html"
