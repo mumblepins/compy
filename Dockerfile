@@ -11,11 +11,13 @@ RUN go get -d -v ./...
 RUN go build -v
 
 FROM alpine:3.7
+
+RUN apk add --no-cache libjpeg libstdc++ ca-certificates libwebp-tools
+
 COPY --from=compy-builder /root/go/src/github.com/mumblepins/compy/compy /usr/local/bin/compy
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
-RUN apk add --no-cache libjpeg libstdc++ ca-certificates libwebp-tools \
-        && chmod +x /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 EXPOSE 9999
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
