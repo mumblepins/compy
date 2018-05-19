@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -14,6 +13,8 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+	"github.com/juju/errors"
+	"strconv"
 )
 
 type Proxy struct {
@@ -25,6 +26,7 @@ type Proxy struct {
 	pass        string
 	host        string
 	cert        string
+	caPath      string
 }
 
 type Transcoder interface {
@@ -46,16 +48,17 @@ func (p *Proxy) EnableMitm(ca, key string) error {
 	if err != nil {
 		return err
 	}
+	p.caPath = ca
 
 	var config *tls.Config
 	if p.cert != "" {
 		roots, err := x509.SystemCertPool()
 		if err != nil {
-			return err
+			return errors.Trace(err)
 		}
 		pem, err := ioutil.ReadFile(p.cert)
 		if err != nil {
-			return err
+			return errors.Trace(err)
 		}
 		ok := roots.AppendCertsFromPEM([]byte(pem))
 		if !ok {
@@ -63,7 +66,6 @@ func (p *Proxy) EnableMitm(ca, key string) error {
 		}
 		config = &tls.Config{RootCAs: roots}
 	}
-
 	p.ml = newMitmListener(cf, config)
 	go http.Serve(p.ml, p)
 	return nil
@@ -89,7 +91,7 @@ func (p *Proxy) StartTLS(host, cert, key string) error {
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Debugf("serving request: %s", r.URL)
 	if err := p.handle(w, r); err != nil {
-		log.Warnf("%s while serving request: %s", err, r.URL)
+		log.Warnf("%s while serving request: %s", errors.Details(err), r.URL)
 	}
 }
 
@@ -134,7 +136,7 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) error {
 	resp, err := forward(r)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		return fmt.Errorf("error forwarding request: %s", err)
+		return errors.Annotate(err, "error forwarding request")
 	}
 	defer resp.Body.Close()
 	rw := newResponseWriter(w)
@@ -145,7 +147,7 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) error {
 	log.Infof("transcoded: %d -> %d (%3.1f%%)", read, written, float64(written)/float64(read)*100)
 	atomic.AddUint64(&p.ReadCount, read)
 	atomic.AddUint64(&p.WriteCount, written)
-	return err
+	return errors.Trace(err)
 }
 
 func (p *Proxy) handleLocalRequest(w http.ResponseWriter, r *http.Request) error {
@@ -168,12 +170,12 @@ func (p *Proxy) handleLocalRequest(w http.ResponseWriter, r *http.Request) error
 </html>`, read, written, float64(written)/float64(read)*100))
 		return nil
 	} else if r.Method == "GET" && r.URL.Path == "/cacert" {
-		if p.cert == "" {
+		if p.caPath == "" {
 			http.NotFound(w, r)
 			return nil
 		}
 		w.Header().Set("Content-Type", "application/x-x509-ca-cert")
-		http.ServeFile(w, r, p.cert)
+		http.ServeFile(w, r, p.caPath)
 		return nil
 	} else {
 		w.WriteHeader(http.StatusNotImplemented)
@@ -198,20 +200,27 @@ func forward(r *http.Request) (*http.Response, error) {
 
 func (p *Proxy) proxyResponse(w *ResponseWriter, r *ResponseReader, headers http.Header) error {
 	w.takeHeaders(r)
+	cLength, err := strconv.Atoi(r.Header().Get("Content-Length"))
+	if err != nil || cLength < 20 {
+		return errors.Trace(w.ReadFrom(r))
+	}
 	transcoder, found := p.transcoders[r.ContentType()]
 	if !found {
-		return w.ReadFrom(r)
+		return errors.Trace(w.ReadFrom(r))
 	}
 	w.setChunked()
+	w.Header().Del("Strict-Transport-Security")
+
+	r.Header().Del("Strict-Transport-Security")
 	if err := transcoder.Transcode(w, r, headers); err != nil {
-		return fmt.Errorf("transcoding error: %s", err)
+		return errors.Annotate(err, "transcoding error")
 	}
 	return nil
 }
 
 func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) error {
 	if p.ml == nil {
-		return fmt.Errorf("CONNECT received but mitm is not enabled")
+		return errors.Errorf("CONNECT received but mitm is not enabled")
 	}
 	w.WriteHeader(http.StatusOK)
 	var conn net.Conn
@@ -229,7 +238,7 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) error {
 	sconn, err := p.ml.Serve(conn, r.Host)
 	if err != nil {
 		conn.Close()
-		return err
+		return errors.Trace(err)
 	}
 	sconn.Close() // TODO: reuse this connection for https requests
 	return nil

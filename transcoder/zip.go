@@ -6,6 +6,9 @@ import (
 	brotlienc "gopkg.in/kothar/brotli-go.v0/enc"
 	"net/http"
 	"strings"
+	"github.com/juju/errors"
+	"bufio"
+	"bytes"
 )
 
 type Zip struct {
@@ -28,13 +31,22 @@ func (t *Zip) Transcode(w *proxy.ResponseWriter, r *proxy.ResponseReader, header
 	}
 
 	// always gunzip if the client supports Brotli
+	//var bufReadWriter *bytes.Buffer
+	//reader := io.TeeReader(r.Reader, bufReadWriter)
+
 	if r.Header().Get("Content-Encoding") == "gzip" && (shouldBrotli || !t.SkipGzipped) {
-		gzr, err := gzip.NewReader(r.Reader)
-		if err != nil {
-			return err
+		bufReader := bufio.NewReader(r.Reader)
+		gzhead, err := bufReader.Peek(3)
+		if err != nil || !bytes.Equal(gzhead, []byte{0x1f, 0x8b, 0x08}) {
+			r.Reader = bufReader
+		} else {
+			gzr, err := gzip.NewReader(bufReader)
+			if err != nil {
+				return errors.Trace(err)
+			}
+			defer gzr.Close()
+			r.Reader = gzr
 		}
-		defer gzr.Close()
-		r.Reader = gzr
 		r.Header().Del("Content-Encoding")
 		w.Header().Del("Content-Encoding")
 	}
@@ -49,7 +61,7 @@ func (t *Zip) Transcode(w *proxy.ResponseWriter, r *proxy.ResponseReader, header
 	} else if shouldGzip && compress(r) {
 		gzw, err := gzip.NewWriterLevel(w.Writer, t.GzipCompressionLevel)
 		if err != nil {
-			return err
+			return errors.Trace(err)
 		}
 		defer gzw.Close()
 		w.Writer = gzw

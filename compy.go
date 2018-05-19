@@ -54,7 +54,7 @@ func main() {
 			log.Warn("not using mitm:", err)
 		}
 	}
-
+	log.Infof("Using MITM with CA: %s and Key: %s", *ca, *caKey)
 	// TODO: require cert and key?
 	if (*user == "") != (*pass == "") {
 		log.Error("must specify both user and pass")

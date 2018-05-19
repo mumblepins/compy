@@ -4,7 +4,6 @@ import (
 	"github.com/mumblepins/compy/proxy"
 	"net/http"
 	"image/gif"
-	log "github.com/sirupsen/logrus"
 	"bytes"
 	"io"
 	"os/exec"
@@ -14,6 +13,7 @@ import (
 	"os"
 	"bufio"
 	"sync"
+	"github.com/juju/errors"
 )
 
 type Gif struct{}
@@ -40,7 +40,7 @@ func (t *Gif) Transcode(w *proxy.ResponseWriter, r *proxy.ResponseReader, header
 			err := cmd.Run()
 			//log.Println(time.Since(start))
 			if err != nil {
-				log.Panicln(err)
+				//log.Warn(errors.Details(err))
 			}
 
 		}()
@@ -56,14 +56,14 @@ func (t *Gif) Transcode(w *proxy.ResponseWriter, r *proxy.ResponseReader, header
 		tRead := io.TeeReader(r, &buf)
 		img, err := gif.DecodeAll(tRead)
 		if err != nil {
-			log.Panicln(err)
+			return errors.Trace(err)
 		}
 
 		if len(img.Image) == 1 {
 			buf.WriteTo(w)
 		} else {
 			if err = gif.Encode(w, img.Image[0], nil); err != nil {
-				return err
+				return errors.Trace(err)
 			}
 		}
 
